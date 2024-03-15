@@ -1,7 +1,6 @@
-from datasets import load_dataset
-from transformers import AutoTokenizer, DataCollatorWithPadding
-from transformers import TrainingArguments, Trainer, AutoModelForSequenceClassification, EarlyStoppingCallback
-from huggingface_hub import notebook_login, HfFolder, HfApi
+from transformers import Trainer, EarlyStoppingCallback, BertConfig, BertModel, TrainingArguments
+from huggingface_hub import HfFolder, HfApi
+import torch.nn as nn
 from collections import Counter
 import numpy as np
 
@@ -17,6 +16,7 @@ from utils.data_loader import MyDataloader
 from sklearn.metrics import classification_report
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def get_data(args) -> dict:
     """get data
@@ -35,6 +35,11 @@ def get_data(args) -> dict:
     
 
     return data_dict
+
+def get_model_config(args):
+    return BertConfig(
+                num_hidden_layers = args.layers,
+            )
 
 def get_train_args(args, repo_name):
     return TrainingArguments(
@@ -61,6 +66,25 @@ def get_train_args(args, repo_name):
                     hub_token=HfFolder.get_token(),
                     )
 
+class BertForSequenceClassification(nn.Module):
+    def __init__(self, num_labels, config):
+        super().__init__()
+        self.num_labels = num_labels
+        self.bert = BertModel(config)
+        self.classifier = nn.Linear(self.bert.config.hidden_size, num_labels)
+
+    def forward(self, input_ids, attention_mask, labels=None):  # Add labels as a parameter
+        output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        classification_input = output.last_hidden_state[:, 0, :]
+        logits = self.classifier(classification_input)  # Renamed for clarity
+
+        # Include loss calculation if labels are provided
+        loss = None
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss()  # Assuming cross-entropy
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            return {"loss": loss, "logits": logits}
+        return {"logits": logits}
 
 def main():
     parser = argparse.ArgumentParser()
@@ -70,6 +94,7 @@ def main():
 
     # model
     parser.add_argument("--model", type=str, default="bert-base-cased", help="model's name")
+    parser.add_argument("--layers", type=int, default=1, help="model's name")
     parser.add_argument("--nepoch", type=int, default=1, help="number of epochs")
     parser.add_argument("--bs", type=int, default=16, help="batch size")
     parser.add_argument("--lr", type=float, default=5e-6, help="learning rate")
@@ -90,7 +115,7 @@ def main():
     print('log_name: ', log_name)
 
     # model name to push to HuggingFace
-    repo_name = 'phusroyal/'+args.model+'-massive_intent'
+    repo_name = 'phusroyal/'+log_name+'-massive_intent'
     print('repo_name: ', repo_name)
     
     # data loader
@@ -101,7 +126,7 @@ def main():
     train_args = get_train_args(args, repo_name)
 
     # get model
-    model = AutoModelForSequenceClassification.from_pretrained(args.model, num_labels=data_dict['num_labels'])
+    model = BertForSequenceClassification(data_dict['num_labels'], get_model_config(args= args))
     # model = torch.compile(model) # using .compile from torch ver 2 to speed up training
 
     # trainer
@@ -153,7 +178,7 @@ def main():
     # whoami = HfApi().whoami()
     # username = whoami['name']
 
-    # print(f"Model webpage link: https://huggingface.co/{repo_name}")
+    print(f"Model webpage link: https://huggingface.co/{repo_name}")
 
 if __name__ == '__main__':
     main()

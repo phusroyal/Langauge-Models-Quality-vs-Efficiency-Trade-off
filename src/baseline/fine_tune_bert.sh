@@ -1,0 +1,2 @@
+python src/baseline/fine_tune_bert.py --seed 42 --model bert-base-cased --nepoch 15 --bs 16 --lr 5e-6 --es 3
+python src/baseline/fine_tune_bert.py --seed 42 --model bert-large-cased --nepoch 15 --bs 8 --lr 5e-6 --es 3
